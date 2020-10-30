@@ -1,6 +1,7 @@
 import matplotlib.pyplot as plt
 import numpy as np
 import os
+import pickle
 import random
 import torch
 import torch.nn as nn
@@ -8,7 +9,7 @@ import torch.nn.functional as F
 import torch.optim as optim
 import torchvision
 
-
+from copy import copy
 from multiprocessing import Process, Queue
 from tensorflow.keras.datasets.mnist import load_data
 
@@ -85,8 +86,12 @@ def train_network(network, opt, x_train, y_train,
     return network, train_loss, train_acc, dev_acc
 
 
-def worker(queue, x_train, y_train, x_dev, y_dev, x_test, y_test,
-           labeled_pts, unlabeled_pts, n_init_pts):
+def random_worker(queue, x_train, y_train, x_dev, y_dev, x_test, y_test,
+                  labeled_pts, unlabeled_pts, n_init_pts):
+
+    np.random.seed(os.getpid())
+    torch.manual_seed(os.getpid())
+
 
     print("Working...")
     
@@ -123,14 +128,103 @@ def worker(queue, x_train, y_train, x_dev, y_dev, x_test, y_test,
             y_test_pred = network(torch.FloatTensor(x_test[start:stop]))
             test_acc += acc(y_test_pred, torch.LongTensor(y_test[start:stop])) / test_batches
 
-            
         trials[iter] = test_acc
-
 
     print("Done work.")
     queue.put(trials)
 
+
     
+def uncertainty_worker(queue, x_train, y_train, x_dev, y_dev, x_test, y_test,
+                       labeled_pts, unlabeled_pts, n_init_pts):
+
+    np.random.seed(os.getpid())
+    torch.manual_seed(os.getpid())
+
+    print("Working...")
+
+    unlabeled_pts_ = copy(unlabeled_pts)
+    labeled_pts_ = copy(labeled_pts)
+    
+    trials = np.zeros(n_iter)
+    for iter in range(n_iter):
+        
+        print("Iter {}".format(iter))
+
+        # Add n_init_pts to labeled randomly. 
+        if iter > 0:
+            print("Sampling new points..")
+            subset = np.random.choice(list(unlabeled_pts_), 1024)
+            new_pts = uncertainty_sample(network, x_train, subset, n_pts=n_init_pts,
+                                         batch_size=64, bayes_samples=8)
+            
+            for point in new_pts:
+                if point in unlabeled_pts_:
+                    unlabeled_pts_.remove(point)
+                else:
+                    print("Troubling finding {} in unlabed...".format(point))
+                labeled_pts_.add(point)
+            
+
+        # Setup training set for this round.
+        x_train_ = x_train[list(labeled_pts_)]
+        y_train_ = y_train[list(labeled_pts_)]
+        
+        # Setup network and train
+        print("Training network...")
+        network = Net()
+        opt = optim.Adam(params=network.parameters(), lr=0.001)
+
+        network, train_loss, train_acc, dev_acc = train_network(
+            network=network, opt=opt, x_train=x_train_, y_train=y_train_, 
+            x_dev=x_dev, y_dev=y_dev, batches=12, batch_size=64, eval_freq=10)
+        
+        # Evaluate the test set.
+        print("Evaluating for scores...")
+        test_batch_size = 100
+        test_batches = n_test_samples // test_batch_size
+        test_acc = 0.
+        for test_batch in range(test_batches):
+            start = test_batch * test_batch_size
+            stop = start + test_batch_size
+            y_test_pred = network(torch.FloatTensor(x_test[start:stop]))
+            test_acc += acc(y_test_pred, torch.LongTensor(y_test[start:stop])) / test_batches
+
+        trials[iter] = test_acc
+
+    print("Done work.")
+    queue.put(trials)
+
+
+
+def uncertainty_sample(network, x_train, unlabeled_pts, n_pts, 
+                       batch_size=8, bayes_samples=64):
+    pool = list(unlabeled_pts)
+    batches = len(pool) // batch_size
+    output = []
+
+    for batch in range(batches):
+        print("Predicting batch {}/{}".format(batch, batches))
+        indices = pool[batch * batch_size : batch * batch_size + batch_size]
+        samples = []
+        for sample in range(bayes_samples):
+            inputs = torch.FloatTensor(x_train[indices])
+            pred = network(inputs)
+            samples.append(pred)
+
+        probs = torch.exp(torch.stack(samples).mean(axis=0))
+        vote_entropy = torch.sum(-1 * torch.log(probs) * probs, axis=1).detach().numpy()
+        output.append(vote_entropy)
+
+    votes = []
+    for probs in output:
+        votes.extend(probs)
+
+    ordering = np.argsort(votes)[::-1]
+    return [pool[index] for index in ordering[:n_pts]]
+
+
+
 if __name__ == "__main__":
 
     (x_train, y_train), (x_test, y_test) = load_data()
@@ -141,8 +235,8 @@ if __name__ == "__main__":
     x_test = x_test.reshape(len(x_test), 1, 28, 28)
 
     n_init_pts = 100
-    n_iter = 3
-    n_trials = 6
+    n_iter = 16
+    n_trials = 32
     
     index_pool = np.random.permutation(np.arange(len(x_train)))
     breakpoint = int(0.8 * len(index_pool))
@@ -160,27 +254,59 @@ if __name__ == "__main__":
     for point in first_pts:
         unlabeled_pts.remove(point)
 
-
-    do_work = lambda q: worker(q, x_train, y_train, x_dev, y_dev, x_test, y_test,
-                             labeled_pts, unlabeled_pts, n_init_pts)
-
-    
-
     n_cores = os.cpu_count() 
-
     queue = Queue()
     workers = []
 
     for job in range(n_trials):
-        workers.append(Process(target=do_work, args=(queue,)))
-        workers[job].start()
-
-    result_pool = []
-    for worker in workers:
-        result_pool.append(queue.get())
-
-    for worker in workers:
-        worker.join()
+        workers.append(Process(target=random_worker, args=(queue,x_train, y_train, x_dev, y_dev, x_test, y_test,
+                             labeled_pts, unlabeled_pts, n_init_pts)))
 
 
-    print(result_pool)
+    random_result_pool = []
+
+    batches = int(np.ceil(n_trials / n_cores))
+    for batch in range(batches):
+        batch_jobs = n_cores
+        if (batch == batches - 1) and n_trials % n_cores != 0:
+            batch_jobs = n_trials % n_cores
+            
+        print("Starting batch {} with {} jobs.".format(batch, batch_jobs))
+        
+        for core in range(batch_jobs):
+            workers[batch * n_cores + core].start()
+
+        for core in range(batch_jobs):
+            random_result_pool.append(queue.get())
+
+        for core in range(batch_jobs):
+            workers[batch * n_cores + core].join()
+            
+    unc_result_pool = [] 
+    queue = Queue()
+    workers = []
+
+    for job in range(n_trials):
+        workers.append(Process(target=uncertainty_worker, args=(queue,x_train, y_train, x_dev, y_dev, x_test, y_test,
+                             labeled_pts, unlabeled_pts, n_init_pts)))
+        
+    for batch in range(batches):
+        batch_jobs = n_cores
+        if (batch == batches - 1) and n_trials % n_cores != 0:
+            batch_jobs = n_trials % n_cores
+            
+        print("Starting batch {} with {} jobs.".format(batch, batch_jobs))
+        
+        for core in range(batch_jobs):
+            workers[batch * n_cores + core].start()
+
+        for core in range(batch_jobs):
+            unc_result_pool.append(queue.get())
+
+        for core in range(batch_jobs):
+            workers[batch * n_cores + core].join()
+            
+
+    results = {"random":random_result_pool, "uncertainty":unc_result_pool}
+    with open("results.pkl", "wb") as outf:
+        pickle.dump(results, outf)
