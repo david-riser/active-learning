@@ -116,7 +116,7 @@ def random_worker(queue, x_train, y_train, x_dev, y_dev, x_test, y_test,
 
         network, train_loss, train_acc, dev_acc = train_network(
             network=network, opt=opt, x_train=x_train_, y_train=y_train_, 
-            x_dev=x_dev, y_dev=y_dev, batches=12, batch_size=64, eval_freq=10)
+            x_dev=x_dev, y_dev=y_dev, batches=1500, batch_size=64, eval_freq=10)
         
         # Evaluate the test set.
         test_batch_size = 100
@@ -177,7 +177,7 @@ def uncertainty_worker(queue, x_train, y_train, x_dev, y_dev, x_test, y_test,
 
         network, train_loss, train_acc, dev_acc = train_network(
             network=network, opt=opt, x_train=x_train_, y_train=y_train_, 
-            x_dev=x_dev, y_dev=y_dev, batches=12, batch_size=64, eval_freq=10)
+            x_dev=x_dev, y_dev=y_dev, batches=1500, batch_size=64, eval_freq=10)
         
         # Evaluate the test set.
         print("Evaluating for scores...")
