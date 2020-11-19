@@ -10,7 +10,6 @@ if __name__ == "__main__":
     results = [] 
     
     for dim, points in zip(dims,pts):
-        data_bundle = utils.setup_data(config)
 
         config = dict(
             n_samples = 10000,
@@ -26,7 +25,8 @@ if __name__ == "__main__":
             batch_size = 32,
             lr = 0.01
         )
-        
+
+        data_bundle = utils.setup_data(config)
         trials = utils.easy_distribute(
             func = lambda: utils.run_random_experiment(config, data_bundle),
             n_trials = config["n_trials"],
