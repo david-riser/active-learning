@@ -139,8 +139,10 @@ def region_sample(network, x_train, y_train, region_radius, n_pts):
     x_new = np.zeros((n_pts, n_features))
 
     for i in range(n_pts):
-        x_new[i] = np.random.normal(0., region_radius) + x_train[ordering[i]]
-        
+        for j in range(x_train.shape[1]):
+            x_new[i,j] = np.random.normal(0., region_radius) + x_train[ordering[i],j]
+            x_new[i,j] = np.clip(x_new[i,j], -3, 3)
+            
     y_new = target_function(x_new)
     return x_new, y_new
 
