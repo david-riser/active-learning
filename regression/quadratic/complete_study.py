@@ -34,7 +34,8 @@ if __name__ == "__main__":
     )
 
     # Parameter sweep setup 
-    radii = [0.01, 0.1, 0.2, 0.4, 1.0]
+    radii = [0.02, 0.1, 0.3]
+    temps = [0.01, 1.0, 100.0]
     n_dimensions = [2, 6]
 
     # Setup data bundles for the different dimensions
@@ -78,12 +79,14 @@ if __name__ == "__main__":
         region_experiments[input_dims] = []
 
         for radius in radii:
-            region_experiments[input_dims].append(
-                utils.easy_distribute(
-                    func = lambda: utils.run_region_experiment(config, data_bundles[input_dims], region_radius=radius),
-                    n_trials = config["n_trials"], n_cores = os.cpu_count()
+            for temp in temps:
+                region_experiments[input_dims].append(
+                    utils.easy_distribute(
+                        func = lambda: utils.run_region2_experiment(config, data_bundles[input_dims],
+                                                                    region_radius=radius, temperature=temp),
+                        n_trials = config["n_trials"], n_cores = os.cpu_count()
+                    )
                 )
-            )
         
 
         
@@ -93,7 +96,8 @@ if __name__ == "__main__":
         uncertainty_experiments = uncertainty_experiments,
         input_dims = n_dimensions, 
         config = config,
-        radii = radii
+        radii = radii,
+        temps = temps
     )
 
     

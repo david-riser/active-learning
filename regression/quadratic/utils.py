@@ -166,14 +166,23 @@ def region_sample2(network, x_train, y_train, region_radius, n_pts, temperature)
         loss[start:stop] = residual
 
     loss = softmax_temperature(loss, temperature)
-    ordering = np.argsort(loss)[::-1]
+
+    # Sample the loss vector as if it represents 
+    # probabilities.  This can be accomplished by
+    # using a mutlinomial sampling.
+    sample_numbers = np.random.multinomial(n=n_pts, pvals=loss)
     
     n_samples, n_features = x_train.shape
     x_new = np.zeros((n_pts, n_features))
 
-    for i in range(n_pts):
-        x_new[i] = np.random.normal(0., region_radius) + x_train[ordering[i]]
-        
+    i = 0 
+    for index, n_samples in enumerate(sample_numbers):
+        for j in range(n_samples):
+            for k in range(n_features):
+                x_new[i + j, k] = np.random.normal(0., region_radius) + x_train[index,k]
+    
+        i += n_samples 
+
     y_new = target_function(x_new)
     return x_new, y_new
 
@@ -182,7 +191,6 @@ def region_sample2(network, x_train, y_train, region_radius, n_pts, temperature)
 # The "experiment" is a series of random trials over the same
 # set of initial point.  Each trial proceeds in a number of 
 # training iterations. 
-
 def perform_training_iteration(network_config, x_train, y_train, 
                                x_dev, y_dev, x_test, y_test, test_batch_size,
                                eval_freq):
