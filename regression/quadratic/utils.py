@@ -109,7 +109,8 @@ def uncertainty_sample(network, x_train, unlabeled_pts, n_pts,
             pred = network(inputs)
             samples.append(pred)
 
-        vote_entropy = torch.std(torch.stack(samples)).detach().numpy()
+        samples = torch.stack(samples).detach().numpy() 
+        vote_entropy = samples.var() / samples.mean()
         output.append(vote_entropy)
 
     ordering = np.argsort(output)[::-1]
@@ -180,7 +181,8 @@ def region_sample2(network, x_train, y_train, region_radius, n_pts, temperature)
         for j in range(n_samples):
             for k in range(n_features):
                 x_new[i + j, k] = np.random.normal(0., region_radius) + x_train[index,k]
-    
+                x_new[i + j, k] = np.clip(x_new[i + j, k], -3, 3)
+
         i += n_samples 
 
     y_new = target_function(x_new)
